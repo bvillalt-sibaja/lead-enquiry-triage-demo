@@ -36,25 +36,53 @@ def pick_font(size):
     return ImageFont.load_default()
 
 
+def wrap_to_width(d, text, font, max_width):
+    """Word-wraps text to fit max_width pixels, measuring with the actual font."""
+    if not text:
+        return [""]
+    words = text.split(" ")
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if d.textlength(candidate, font=font) <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
 def render(data, out_path):
     subject = data.get("subject") or ""
     sender_name = data.get("sender_name") or "Unknown sender"
     sender_email = data.get("sender_email") or ""
     body = data.get("body") or ""
-    body_lines = body.split("\n")
 
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
+    content_width = W - 44
+
+    subject_font = pick_font(20)
+    while d.textlength(subject, font=subject_font) > content_width and len(subject) > 3:
+        subject = subject[:-4].rstrip() + "..."
+
     d.rectangle([0, 0, W, 56], fill=HEADER_BG)
-    d.text((20, 18), subject, font=pick_font(20), fill=TEXT)
+    d.text((20, 18), subject, font=subject_font, fill=TEXT)
     d.line([0, 56, W, 56], fill=(220, 220, 220), width=1)
     d.text((20, 72), f"{sender_name}  <{sender_email}>", font=pick_font(14), fill=SUBTLE)
     d.line([0, 100, W, 100], fill=(230, 230, 230), width=1)
+
     y = 130
     body_font = pick_font(15)
-    for line in body_lines:
-        d.text((24, y), line, font=body_font, fill=TEXT)
-        y += 30
+    for paragraph in body.split("\n"):
+        for line in wrap_to_width(d, paragraph, body_font, content_width):
+            if y > H - 20:
+                break
+            d.text((24, y), line, font=body_font, fill=TEXT)
+            y += 25
         if y > H - 20:
             break
     img.save(out_path)
