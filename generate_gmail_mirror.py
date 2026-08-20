@@ -1,0 +1,156 @@
+"""Renders a static, Gmail-styled "results" page for the lead_enquiry_triage_demo
+automation and opens it in the default browser. Not a full Gmail mirror - just
+enough to show, at a glance, what the automation (fake-)sent: the original
+inbound enquiry (read, shown collapsed inside its thread) plus whatever
+outgoing message(s) landed in "Sent" this run. Nothing on the page is
+interactive; it's a fixed snapshot regenerated fresh every run.
+
+Usage: python3 generate_gmail_mirror.py <input_data.json> <output.html>
+
+Input JSON shape:
+{
+  "enquiry": {"sender_name": str, "sender_email": str, "subject": str, "body": str},
+  "sent_messages": [{"to": str, "subject": str, "body": str}, ...]
+}
+"""
+import html
+import json
+import sys
+import webbrowser
+from pathlib import Path
+
+CSS = """
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: Arial, Helvetica, "Segoe UI", sans-serif;
+  background: #f6f8fc; color: #202124;
+}
+.topbar {
+  display: flex; align-items: center; gap: 24px;
+  padding: 10px 16px; background: #fff; border-bottom: 1px solid #e0e0e0;
+}
+.logo { font-size: 22px; font-weight: 500; color: #5f6368; letter-spacing: -0.5px; }
+.logo b { color: #ea4335; }
+.search {
+  flex: 1; max-width: 720px; background: #eaf1fb; border-radius: 8px;
+  padding: 10px 16px; color: #5f6368; font-size: 14px;
+}
+.shell { display: flex; }
+.sidebar { width: 220px; padding: 16px 8px; }
+.compose {
+  background: #c2e7ff; color: #001d35; border-radius: 16px; padding: 14px 24px;
+  font-weight: 500; font-size: 14px; margin: 0 8px 20px 8px; display: inline-block;
+}
+.nav-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 20px; border-radius: 0 16px 16px 0; font-size: 14px; color: #202124;
+}
+.nav-item.active { background: #d3e3fd; font-weight: 700; }
+.nav-badge { color: #5f6368; font-size: 12px; }
+.main { flex: 1; padding: 20px 28px; }
+.folder-title { font-size: 22px; font-weight: 400; margin: 4px 0 20px 4px; }
+.thread {
+  background: #fff; border-radius: 8px; padding: 20px 24px; margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+.msg { padding: 12px 0; }
+.msg + .msg { border-top: 1px solid #eee; }
+.msg-head { display: flex; justify-content: space-between; align-items: baseline; }
+.msg-from { font-weight: 700; font-size: 14px; }
+.msg-from .addr { font-weight: 400; color: #5f6368; }
+.msg-time { color: #5f6368; font-size: 12px; }
+.msg-subject { font-size: 15px; font-weight: 700; margin: 6px 0 4px 0; }
+.msg-body { font-size: 14px; line-height: 1.5; white-space: pre-wrap; color: #202124; }
+.msg.collapsed .msg-body { color: #5f6368; font-weight: 400; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
+.tag {
+  display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+  background: #34a853; border-radius: 4px; padding: 2px 6px; margin-left: 8px;
+  vertical-align: middle;
+}
+.note { color: #5f6368; font-size: 12px; margin-top: 24px; }
+"""
+
+
+def esc(s):
+    return html.escape(s or "")
+
+
+def render_message(sender_name, sender_email, subject, body, when, collapsed, tag=None):
+    tag_html = f'<span class="tag">{esc(tag)}</span>' if tag else ""
+    cls = "msg collapsed" if collapsed else "msg"
+    return f"""
+    <div class="{cls}">
+      <div class="msg-head">
+        <div class="msg-from">{esc(sender_name)} <span class="addr">&lt;{esc(sender_email)}&gt;</span>{tag_html}</div>
+        <div class="msg-time">{esc(when)}</div>
+      </div>
+      <div class="msg-subject">{esc(subject)}</div>
+      <div class="msg-body">{esc(body)}</div>
+    </div>
+    """
+
+
+def render(data):
+    enquiry = data.get("enquiry", {})
+    sent = data.get("sent_messages", [])
+
+    thread_messages = [render_message(
+        enquiry.get("sender_name") or "Unknown sender", enquiry.get("sender_email", ""),
+        enquiry.get("subject", ""), enquiry.get("body", ""),
+        "Earlier", collapsed=True,
+    )]
+    for m in sent:
+        thread_messages.append(render_message(
+            "Me", "you@yourcompany.example",
+            m.get("subject", ""), m.get("body", ""),
+            "Just now", collapsed=False, tag="Sent",
+        ))
+    thread_html = "".join(thread_messages)
+
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gmail Mirror &mdash; Results</title>
+<style>{CSS}</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><b>M</b> Gmail</div>
+    <div class="search">Search mail</div>
+  </div>
+  <div class="shell">
+    <div class="sidebar">
+      <div class="compose">Compose</div>
+      <div class="nav-item"><span>Inbox</span><span class="nav-badge">1</span></div>
+      <div class="nav-item active"><span>Sent</span></div>
+      <div class="nav-item"><span>Drafts</span></div>
+    </div>
+    <div class="main">
+      <div class="folder-title">Sent</div>
+      <div class="thread">
+        {thread_html}
+      </div>
+      <div class="note">Generated by lead_enquiry_triage_demo.robot &mdash; a fixed snapshot of this run, not a live inbox.</div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("usage: generate_gmail_mirror.py <input_data.json> <output.html>", file=sys.stderr)
+        sys.exit(2)
+    data_path, out_path = sys.argv[1], sys.argv[2]
+    with open(data_path, "r") as f:
+        data = json.load(f)
+    html_out = render(data)
+    out = Path(out_path)
+    out.write_text(html_out)
+    webbrowser.open(f"file://{out.resolve()}")
+
+
+if __name__ == "__main__":
+    main()
